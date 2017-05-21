@@ -3,8 +3,9 @@
 #include <WiFi101.h>
 #include <WiFiUdp.h>
 #include <RTCZero.h>
-#include "config.h"
 #include <cstdio>
+#include "config.h"
+#include "Sensors.h"
 
 // The <Arduino.h> header defines max and min macros.
 // It really shouldn't do that.
@@ -32,6 +33,9 @@ RTCZero rtc;
 WiFiClient client;
 
 WiFiUDP udp;
+
+// Sensor Shield
+static Sensors sensors;
 
 namespace time {
 
@@ -72,28 +76,86 @@ using State = void (*)();
 static State state = request;
 static auto last_request = time::now();
 
+struct SensorData
+{
+    uint8_t config;
+    uint8_t status;
+    uint16_t adc;
+    uint16_t hft;
+    uint16_t lft;
+    double temp;
+};
+
+template<typename T> T bigendian(uint8_t const* bytes, unsigned offset = 0u)
+{
+    T value;
+
+    for( auto i = 0; i < sizeof(T); ++i )
+    {
+        value <<= 8u;
+        value  |= bytes[offset + i];
+    }
+
+    return value;
+}
+
+static SensorData readSensor(unsigned cs)
+{
+    uint8_t regs[8];
+
+    sensors.readout(cs, regs, sizeof(regs));
+
+    uint16_t const adc = bigendian<uint16_t>(regs, 1) >> 1u;
+
+    return {
+        regs[0],
+        regs[7],
+        adc,
+        bigendian<uint16_t>(regs, 3),
+        bigendian<uint16_t>(regs, 5),
+        adc * 0.031249727 + (-255.9977596)
+    };
+}
+
 static void request()
 {
-    char buffer[256];
+    auto const t = rtc.getEpoch();
+
+    SensorData const data[] = {
+        readSensor(CS_0),
+        readSensor(CS_1)
+    };
+
+    char influx_line[256];
 
     auto const size = snprintf(
-        buffer,
-        sizeof(buffer),
+        influx_line,
+        sizeof(influx_line),
         "mkr1000,board=A t1=%f,t2=%f",
-        21.0,
-        22.0
+        data[0].temp,
+        data[1].temp
     );
 
-    Serial.print(rtc.getEpoch());
-    Serial.print(" : ");
+    char log_line[256];
+
+    snprintf(
+        log_line,
+        sizeof(log_line),
+        "%d : %X %X %d %s\r\n",
+        t,
+        data[0].status,
+        data[0].adc,
+        data[0].adc,
+        influx_line
+    );
+
+    Serial.print(log_line);
 
     if( size > 0 )
     {
-        Serial.println(buffer);
-
         udp.beginPacket(server, port);
         udp.write(
-            reinterpret_cast<uint8_t const*>(buffer),
+            reinterpret_cast<uint8_t const*>(influx_line),
             size
         );
         udp.endPacket();
@@ -159,7 +221,9 @@ void setup()
         Serial.println("failed to open UDP port");
        
         for(;;) {}
-    } 
+    }
+
+    sensors.init();
 }
 
 static bool connectToWifi()
