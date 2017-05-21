@@ -4,6 +4,7 @@
 #include <WiFiUdp.h>
 #include <RTCZero.h>
 #include "config.h"
+#include <cstdio>
 
 // The <Arduino.h> header defines max and min macros.
 // It really shouldn't do that.
@@ -13,12 +14,15 @@
 #include <limits>
 
 int status = WL_IDLE_STATUS;
+
 // if you don't want to use DNS (and reduce your sketch size)
 // use the numeric IP instead of the name for the server:
-//IPAddress server(74,125,232,128);  // numeric IP for Google (no DNS)
-char server[] = "192.168.2.33"; // name address for Google (using DNS)
 
-static constexpr auto port = 8080;
+IPAddress server(192,168,2,41);  // numeric IP (no DNS)
+
+// char server[] = "192.168.2.41"; // name address (using DNS)
+
+static constexpr auto port = 20170;
 
 RTCZero rtc;
 
@@ -26,6 +30,8 @@ RTCZero rtc;
 // with the IP address and port of the server
 // that you want to connect to (port 80 is default for HTTP):
 WiFiClient client;
+
+WiFiUDP udp;
 
 namespace time {
 
@@ -68,46 +74,39 @@ static auto last_request = time::now();
 
 static void request()
 {
-    Serial.println("\nStarting connection to server...");
+    char buffer[256];
 
-    // if you get a connection, report back via serial:
-    if( client.connect(server, port) )
+    auto const size = snprintf(
+        buffer,
+        sizeof(buffer),
+        "mkr1000,board=A t1=%f,t2=%f",
+        21.0,
+        22.0
+    );
+
+    Serial.print(rtc.getEpoch());
+    Serial.print(" : ");
+
+    if( size > 0 )
     {
-        Serial.println("connected to server");
-        // Make a HTTP request:
-        client.println("GET /search?q=arduino HTTP/1.1");
-        client.println("Host: www.google.com");
-        client.println("Connection: close");
-        client.println();
+        Serial.println(buffer);
 
-        last_request = time::now();
-
-        Serial.print("now = ");
-        Serial.println(rtc.getEpoch());
-
-        state = response;
+        udp.beginPacket(server, port);
+        udp.write(
+            reinterpret_cast<uint8_t const*>(buffer),
+            size
+        );
+        udp.endPacket();
     }
+
+    last_request = time::now();
+
+    state = wait;
 }
 
 static void response()
 {
-    // if there are incoming bytes available
-    // from the server, read them and print them:
-    while( client.available() )
-    {
-        char c = client.read();
-        Serial.write(c);
-    }
 
-    // if the server's disconnected, stop the client:
-    if( ! client.connected() )
-    {
-        Serial.println();
-        Serial.println("disconnecting from server.");
-        client.stop();
-
-        state = wait;
-    }
 }
 
 static void wait()
@@ -151,7 +150,16 @@ void setup()
         Serial.println("WiFi shield not present");
        
         for(;;) {}
-    }    
+    }
+
+    // open socket on arbitrary port
+
+    if( ! udp.begin(123) )
+    {
+        Serial.println("failed to open UDP port");
+       
+        for(;;) {}
+    } 
 }
 
 static bool connectToWifi()
