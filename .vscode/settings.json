@@ -1,0 +1,13 @@
+{
+    "files.associations": {
+        "*.ino": "cpp",
+        "functional": "cpp",
+        "utility": "cpp",
+        "*h*h*h*h*h*hxutility": "cpp",
+        "xutility": "cpp",
+        "xmemory0": "cpp",
+        "xfunctional": "cpp"
+    },
+    "editor.tabSize": 4,
+    "editor.renderIndentGuides": true
+}

@@ -126,6 +126,8 @@ static void request()
         readSensor(CS_1)
     };
 
+    // use influx server time
+
     char influx_line[256];
 
     auto const size = snprintf(
@@ -184,10 +186,12 @@ void setup()
     //Initialize serial and wait for port to open:
     Serial.begin(9600);
 
-    while( ! Serial )
-    {
-        // wait for serial port to connect. Needed for native USB port only
-    }
+#if 0
+    // wait for serial port to connect. Needed for native USB port only
+    while( ! Serial ) {}
+#endif
+
+    // Print RTC time
 
     rtc.begin();
 
@@ -215,6 +219,7 @@ void setup()
     }
 
     // open socket on arbitrary port
+    // we use it to send influx lines to the db server
 
     if( ! udp.begin(123) )
     {
@@ -226,31 +231,15 @@ void setup()
     sensors.init();
 }
 
-static bool connectToWifi()
+static bool syncNTP()
 {
-    Serial.print("Attempting to connect to SSID: ");
-    Serial.println(ssid);
-    
-    // Connect to WPA/WPA2 network. Change this line if using open or WEP network:
-    status = WiFi.begin(ssid, pass);
-
-    auto const t0 = time::now();
-
-    while( status != WL_CONNECTED )
+    for( auto i = 0u; i < 20; ++i )
     {
-        if( time::elapsed_since(t0) > 10000 )
+        if( status != WL_CONNECTED )
         {
-            Serial.println("Connection attempt failed");
-            return false;
-        }        
-    }
+            break;
+        }
 
-    Serial.println("Connected to wifi");
-
-    printWiFiStatus();
-
-    while( status == WL_CONNECTED )
-    {
         auto const ntp_epoch = WiFi.getTime();
 
         if( ntp_epoch )
@@ -281,6 +270,34 @@ static bool connectToWifi()
     }
 
     return false;
+}
+
+static bool connectToWifi()
+{
+    Serial.print("Attempting to connect to SSID: ");
+    Serial.println(ssid);
+    
+    // Connect to WPA/WPA2 network. Change this line if using open or WEP network:
+    status = WiFi.begin(ssid, pass);
+
+    auto const t0 = time::now();
+
+    while( status != WL_CONNECTED )
+    {
+        if( time::elapsed_since(t0) > 10000 )
+        {
+            Serial.println("Connection attempt failed");
+            return false;
+        }        
+    }
+
+    Serial.println("Connected to wifi");
+
+    printWiFiStatus();
+
+    syncNTP();
+
+    return true;
 }
 
 void loop()
