@@ -19,11 +19,9 @@ int status = WL_IDLE_STATUS;
 // if you don't want to use DNS (and reduce your sketch size)
 // use the numeric IP instead of the name for the server:
 
-IPAddress server(192,168,2,41);  // numeric IP (no DNS)
+IPAddress server(192,168,4,1);  // numeric IP (no DNS)
 
-// char server[] = "192.168.2.41"; // name address (using DNS)
-
-static constexpr auto port = 20170;
+static constexpr auto port = 8089;
 
 RTCZero rtc;
 
@@ -99,7 +97,7 @@ template<typename T> T bigendian(uint8_t const* bytes, unsigned offset = 0u)
     return value;
 }
 
-static SensorData readSensor(unsigned cs)
+static SensorData readSensor(unsigned ch, unsigned cs)
 {
     uint8_t regs[8];
 
@@ -107,13 +105,22 @@ static SensorData readSensor(unsigned cs)
 
     uint16_t const adc = bigendian<uint16_t>(regs, 1) >> 1u;
 
+    // adc * 0.031249727 + (-255.9977596)
+    static struct {
+      double a;
+      double b;      
+    } const coefficients[] = {
+      { 0.032068,  -262.799048 },
+      { 0.031228,  -255.507519 }
+    };
+
     return {
         regs[0],
         regs[7],
         adc,
         bigendian<uint16_t>(regs, 3),
         bigendian<uint16_t>(regs, 5),
-        adc * 0.031249727 + (-255.9977596)
+        adc * coefficients[ch].a + coefficients[ch].b
     };
 }
 
@@ -122,8 +129,8 @@ static void request()
     auto const t = rtc.getEpoch();
 
     SensorData const data[] = {
-        readSensor(CS_0),
-        readSensor(CS_1)
+        readSensor(0, CS_0),
+        readSensor(1, CS_1)
     };
 
     // use influx server time
@@ -133,8 +140,10 @@ static void request()
     auto const size = snprintf(
         influx_line,
         sizeof(influx_line),
-        "mkr1000,board=A t1=%f,t2=%f",
+        "mkr1000,board=" INFLUX_BOARD_TAG " adc1=%u,t1=%f,adc2=%u,t2=%f",
+        data[0].adc,
         data[0].temp,
+        data[1].adc,
         data[1].temp
     );
 
@@ -143,11 +152,12 @@ static void request()
     snprintf(
         log_line,
         sizeof(log_line),
-        "%d : %X %X %d %s\r\n",
+        "%d : %X %X, %X %X %s\r\n",
         t,
         data[0].status,
         data[0].adc,
-        data[0].adc,
+        data[1].status,
+        data[1].adc,
         influx_line
     );
 
